@@ -113,8 +113,8 @@ In-game, tap your clan name → look for the tag like `#YV9JRULU`. Note: **clan 
 ### 3. Clone and install
 
 ```bash
-git clone https://github.com/<your-username>/coc-mcp.git
-cd coc-mcp
+git clone https://github.com/justinritchie/clash-of-clans-mcp.git
+cd clash-of-clans-mcp
 pip install -r requirements.txt
 ```
 
