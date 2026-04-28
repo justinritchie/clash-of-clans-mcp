@@ -1,8 +1,14 @@
 # Clash of Clans MCP Server
 
-A Model Context Protocol (MCP) server that lets Claude (or any MCP client) read your clan's data from the **official Clash of Clans API** and apply your clan's own rules to it — for war grading, elder promotion screening, and CWL carry-forward decisions.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/MCP-server-green.svg)](https://modelcontextprotocol.io)
 
-Built for clan leaders who want **AI-assisted analysis**, not another Discord bot.
+A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that lets Claude (or any MCP client) read your clan's data from the **official [Clash of Clans API](https://developer.clashofclans.com)** and apply your clan's own rules to it — for war grading, elder promotion screening, and CWL carry-forward decisions.
+
+Built for clan leaders who want **AI-assisted clan analysis** with reproducible, configurable rules.
+
+**Keywords**: Clash of Clans, MCP, Model Context Protocol, Claude, Claude Desktop, clan war, CWL, Clan War League, clan management, elder promotion, war analysis, Supercell API.
 
 ---
 
