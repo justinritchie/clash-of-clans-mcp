@@ -1,0 +1,66 @@
+{
+  "_comment": "Default grading rubric for war attacks. Override per-call or via COC_RUBRIC_PATH. Edit freely — all values configurable.",
+
+  "war_attack_rubric": {
+    "_comment": "Rules for grading regular war attacks (2 attacks per player).",
+    "attacks_per_player": 2,
+    "first_attack": {
+      "_comment": "Acceptable target offsets relative to attacker's map position. 0 = mirror, +1 = one down (one weaker), etc.",
+      "acceptable_offsets": [0, 1],
+      "min_stars_for_pass": 2,
+      "min_destruction_for_pass": 70
+    },
+    "second_attack": {
+      "_comment": "Second attack should be a 'smart 3-star' — typically a base lower than your rank.",
+      "preferred_offsets_min": 1,
+      "preferred_offsets_max": 99,
+      "must_3_star": true,
+      "min_destruction_if_no_3_star": 95
+    },
+    "missed_attack_penalty": -10,
+    "scoring": {
+      "three_star": 10,
+      "two_star": 5,
+      "one_star": 2,
+      "zero_star": 0,
+      "first_attack_off_target_penalty": -3,
+      "second_attack_3_star_bonus": 3
+    }
+  },
+
+  "cwl_attack_rubric": {
+    "_comment": "Rules for grading CWL attacks (1 attack per player per round).",
+    "attacks_per_player": 1,
+    "attack": {
+      "acceptable_offsets": [-1, 0, 1],
+      "must_3_star": false,
+      "min_stars_for_pass": 2,
+      "min_destruction_for_pass": 80
+    },
+    "missed_attack_penalty": -15,
+    "scoring": {
+      "three_star": 10,
+      "two_star": 6,
+      "one_star": 2,
+      "zero_star": 0
+    }
+  },
+
+  "elder_promotion_rubric": {
+    "_comment": "Bar for member -> elder promotion. Used by clash_promotion_candidates.",
+    "min_tenure_days": 30,
+    "min_donation_ratio": 0.4,
+    "min_hero_progress_pct": 80,
+    "min_war_score_last_n": 50,
+    "war_score_window": 5,
+    "max_missed_attacks_window": 1
+  },
+
+  "carry_forward_rubric": {
+    "_comment": "Bar for keeping a player in the next CWL roster. Used by clash_carry_forward_recommendation.",
+    "min_attacks_used_pct": 100,
+    "min_avg_stars": 2.0,
+    "min_avg_destruction": 75,
+    "bench_if_consecutive_missed": 1
+  }
+}

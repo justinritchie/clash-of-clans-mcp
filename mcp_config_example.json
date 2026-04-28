@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "coc": {
+      "command": "python3",
+      "args": ["/Users/justinritchie/justinritchie-mcp-servers/coc-mcp/coc_mcp_server.py"],
+      "env": {
+        "COC_API_TOKEN": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+        "COC_DEFAULT_CLAN_TAG": "#YV9JRULU"
+      }
+    }
+  }
+}

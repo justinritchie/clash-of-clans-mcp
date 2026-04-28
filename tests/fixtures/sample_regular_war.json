@@ -1,0 +1,80 @@
+{
+  "state": "warEnded",
+  "teamSize": 5,
+  "attacksPerMember": 2,
+  "preparationStartTime": "20260420T000000.000Z",
+  "startTime": "20260421T000000.000Z",
+  "endTime": "20260422T000000.000Z",
+  "clan": {
+    "tag": "#YV9JRULU",
+    "name": "Broken Arrow",
+    "clanLevel": 27,
+    "stars": 11,
+    "destructionPercentage": 78.5,
+    "members": [
+      {
+        "tag": "#P1",
+        "name": "Top1",
+        "townhallLevel": 17,
+        "mapPosition": 1,
+        "attacks": [
+          {"attackerTag": "#P1", "defenderTag": "#E1", "stars": 3, "destructionPercentage": 100, "order": 1, "duration": 180},
+          {"attackerTag": "#P1", "defenderTag": "#E3", "stars": 3, "destructionPercentage": 100, "order": 5, "duration": 180}
+        ],
+        "opponentAttacks": 0
+      },
+      {
+        "tag": "#P2",
+        "name": "MirrorBoss",
+        "townhallLevel": 17,
+        "mapPosition": 2,
+        "attacks": [
+          {"attackerTag": "#P2", "defenderTag": "#E2", "stars": 2, "destructionPercentage": 89, "order": 2, "duration": 180},
+          {"attackerTag": "#P2", "defenderTag": "#E4", "stars": 3, "destructionPercentage": 100, "order": 6, "duration": 180}
+        ],
+        "opponentAttacks": 0
+      },
+      {
+        "tag": "#P3",
+        "name": "RuleBreaker",
+        "townhallLevel": 17,
+        "mapPosition": 3,
+        "attacks": [
+          {"attackerTag": "#P3", "defenderTag": "#E5", "stars": 3, "destructionPercentage": 100, "order": 3, "duration": 180}
+        ],
+        "opponentAttacks": 0
+      },
+      {
+        "tag": "#P4",
+        "name": "OneShot",
+        "townhallLevel": 16,
+        "mapPosition": 4,
+        "attacks": [
+          {"attackerTag": "#P4", "defenderTag": "#E4", "stars": 1, "destructionPercentage": 55, "order": 4, "duration": 180}
+        ],
+        "opponentAttacks": 0
+      },
+      {
+        "tag": "#P5",
+        "name": "NoShow",
+        "townhallLevel": 16,
+        "mapPosition": 5,
+        "opponentAttacks": 0
+      }
+    ]
+  },
+  "opponent": {
+    "tag": "#OPP",
+    "name": "Test Opponents",
+    "clanLevel": 20,
+    "stars": 9,
+    "destructionPercentage": 70,
+    "members": [
+      {"tag": "#E1", "name": "Enemy1", "townhallLevel": 17, "mapPosition": 1},
+      {"tag": "#E2", "name": "Enemy2", "townhallLevel": 17, "mapPosition": 2},
+      {"tag": "#E3", "name": "Enemy3", "townhallLevel": 17, "mapPosition": 3},
+      {"tag": "#E4", "name": "Enemy4", "townhallLevel": 16, "mapPosition": 4},
+      {"tag": "#E5", "name": "Enemy5", "townhallLevel": 16, "mapPosition": 5}
+    ]
+  }
+}
