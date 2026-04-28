@@ -1,10 +1,46 @@
 """Markdown report generators for human-readable war summaries."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
-def war_report_markdown(graded: Dict[str, Any], war_meta: Dict[str, Any] | None = None) -> str:
+def missed_opportunities_markdown(missed: List[Dict[str, Any]]) -> str:
+    """Render a list of missed-opportunity records as a markdown section."""
+    if not missed:
+        return "## ⭐ Missed Opportunities (lower base was available + undefeated)\n\n_None — every reach-up either succeeded or had no easier target available._\n"
+
+    by_severity = {"high": [], "medium": [], "low": []}
+    for r in missed:
+        by_severity[r["severity"]].append(r)
+
+    lines = ["## ⭐ Missed Opportunities (lower base was available + undefeated)", ""]
+    lines.append(
+        f"_{len(missed)} attack(s) reached for a target when an easier, undefeated base was sitting right there._"
+    )
+    lines.append("")
+    for sev_label, sev_emoji in (("high", "🔴 High"), ("medium", "🟡 Medium"), ("low", "⚪ Low")):
+        items = by_severity[sev_label]
+        if not items:
+            continue
+        lines.append(f"### {sev_emoji} severity ({len(items)})")
+        lines.append("")
+        for r in items:
+            avail_summary = ", ".join(
+                f"#{w['pos']} (TH{w['th']})" for w in r["available_weaker_undefeated"][:5]
+            )
+            extra = ""
+            if len(r["available_weaker_undefeated"]) > 5:
+                extra = f", +{len(r['available_weaker_undefeated']) - 5} more"
+            lines.append(
+                f"- **{r['attacker_name']}** (#{r['attacker_pos']}, TH{r['attacker_th']}, attack #{r['attack_seq']}) → "
+                f"hit #{r['actual_target_pos']} (TH{r['actual_target_th']}) for **{r['actual_stars']}⭐ {r['actual_destruction']:.0f}%**. "
+                f"Easier targets undefeated at the time: {avail_summary}{extra}."
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def war_report_markdown(graded: Dict[str, Any], war_meta: Dict[str, Any] | None = None, missed: Optional[List[Dict[str, Any]]] = None) -> str:
     """Render a graded war as a leadership-friendly markdown post-mortem.
 
     Sections answer the four common leadership questions:
@@ -109,6 +145,10 @@ def war_report_markdown(graded: Dict[str, Any], war_meta: Dict[str, Any] | None 
         else:
             lines.append("_No qualifying smart 3⭐ attacks this war._")
         lines.append("")
+
+    # 5. Missed opportunities (cross-cutting analysis using attack order)
+    if missed is not None:
+        lines.append(missed_opportunities_markdown(missed))
 
     return "\n".join(lines)
 

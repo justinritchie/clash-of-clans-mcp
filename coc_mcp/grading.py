@@ -95,6 +95,151 @@ def _missed_attacks_per_player(war: Dict[str, Any], attacks_per_player: int, our
     return out
 
 
+def find_missed_opportunities(
+    war: Dict[str, Any],
+    *,
+    our_clan_tag: Optional[str] = None,
+    th_buffer: int = 0,
+) -> List[Dict[str, Any]]:
+    """Identify attacks where a weaker, undefeated base was available at the time.
+
+    Walks attacks in chronological `order` and tracks which opponent bases have
+    been 3-starred. For each attack at order N, checks whether — at that exact
+    moment — there was a still-undefeated base WEAKER than the one chosen
+    (higher map position) AND at a TH the attacker could plausibly handle.
+
+    Args:
+        war: Raw war JSON.
+        our_clan_tag: Our clan tag. Auto-detect if absent.
+        th_buffer: Allow weaker bases up to this many TH levels above the
+            attacker's TH (default 0 = strictly weaker or equal TH). Set to 1
+            to be more lenient.
+
+    Returns:
+        List of missed-opportunity records sorted by severity:
+            {
+              attacker_name, attacker_tag, attacker_pos, attacker_th,
+              attack_order, attack_seq,
+              actual_target_pos, actual_target_th, actual_stars, actual_destruction,
+              available_weaker_undefeated: [{pos, tag, th}, ...],
+              severity: 'high' | 'medium' | 'low',
+              note: str,
+            }
+    """
+    # Identify our side and their side.
+    if our_clan_tag and war.get("opponent", {}).get("tag") == our_clan_tag:
+        our_side, their_side = war["opponent"], war["clan"]
+    else:
+        our_side, their_side = war.get("clan", {}), war.get("opponent", {})
+
+    our_members = our_side.get("members", []) or []
+    their_members = their_side.get("members", []) or []
+
+    # Index opponents by tag for quick lookup; track their position + TH.
+    opp_by_tag = {m["tag"]: m for m in their_members}
+    opp_tags_by_pos = {m["mapPosition"]: m["tag"] for m in their_members}
+
+    # Build a flat, chronological list of OUR attacks.
+    flat: List[Dict[str, Any]] = []
+    for m in our_members:
+        attacks = m.get("attacks", []) or []
+        attacks_sorted = sorted(attacks, key=lambda a: a.get("order", 0))
+        for seq, atk in enumerate(attacks_sorted, start=1):
+            flat.append({
+                "attacker_member": m,
+                "attack": atk,
+                "seq": seq,
+            })
+    flat.sort(key=lambda r: r["attack"].get("order", 0))
+
+    # Track defender bases that are 3-starred (cleared) at any point.
+    cleared_positions: set = set()
+    out: List[Dict[str, Any]] = []
+
+    for entry in flat:
+        m = entry["attacker_member"]
+        atk = entry["attack"]
+        seq = entry["seq"]
+
+        attacker_pos = m.get("mapPosition")
+        attacker_th = m.get("townhallLevel", 0)
+        defender = opp_by_tag.get(atk.get("defenderTag"), {})
+        defender_pos = defender.get("mapPosition")
+        defender_th = defender.get("townhallLevel", 0)
+        stars = atk.get("stars", 0)
+        destruction = atk.get("destructionPercentage", 0.0)
+
+        # Find weaker undefeated bases AT THIS MOMENT.
+        # "Weaker" = higher map position (positions are strongest-first).
+        weaker_avail: List[Dict[str, Any]] = []
+        if defender_pos is not None:
+            for opp_pos, opp_tag in sorted(opp_tags_by_pos.items()):
+                if opp_pos <= defender_pos:
+                    continue  # not weaker than what they actually attacked
+                if opp_pos in cleared_positions:
+                    continue  # already 3-starred, not "available"
+                opp = opp_by_tag.get(opp_tag, {})
+                opp_th = opp.get("townhallLevel", 0)
+                # Only flag as missed opportunity if attacker could likely handle it
+                # (defender TH ≤ attacker TH + buffer).
+                if opp_th <= attacker_th + th_buffer:
+                    weaker_avail.append({
+                        "pos": opp_pos,
+                        "tag": opp_tag,
+                        "name": opp.get("name"),
+                        "th": opp_th,
+                    })
+
+        # An attack only counts as a "missed opportunity" if:
+        #   1. They didn't 3-star (otherwise no "missed" — they did the job)
+        #   2. AND a weaker undefeated base was available at the time
+        is_missed = (stars < 3 and len(weaker_avail) > 0)
+
+        if is_missed:
+            # Severity: how much higher did they reach + how big the gap to weaker target?
+            offset = defender_pos - attacker_pos if (defender_pos and attacker_pos) else 0
+            weakest_avail_pos = max(w["pos"] for w in weaker_avail)
+            gap = weakest_avail_pos - defender_pos
+            if offset < 0 and stars <= 1:
+                severity = "high"
+            elif gap >= 3 or stars == 0:
+                severity = "high"
+            elif gap >= 1 and stars <= 1:
+                severity = "medium"
+            else:
+                severity = "low"
+
+            note = (
+                f"Hit base #{defender_pos} (TH{defender_th}) for {stars}⭐ {destruction:.0f}%; "
+                f"{len(weaker_avail)} weaker undefeated base(s) were available "
+                f"(positions {[w['pos'] for w in weaker_avail]})."
+            )
+
+            out.append({
+                "attacker_name": m.get("name"),
+                "attacker_tag": m["tag"],
+                "attacker_pos": attacker_pos,
+                "attacker_th": attacker_th,
+                "attack_order": atk.get("order"),
+                "attack_seq": seq,
+                "actual_target_pos": defender_pos,
+                "actual_target_th": defender_th,
+                "actual_stars": stars,
+                "actual_destruction": destruction,
+                "available_weaker_undefeated": weaker_avail,
+                "severity": severity,
+                "note": note,
+            })
+
+        # Update cleared set AFTER evaluating this attack (it might 3-star).
+        if stars >= 3 and defender_pos is not None:
+            cleared_positions.add(defender_pos)
+
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    out.sort(key=lambda r: (severity_rank[r["severity"]], -(r["actual_target_pos"] or 0)))
+    return out
+
+
 # --- Public API ------------------------------------------------------------
 
 def grade_war(

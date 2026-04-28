@@ -26,10 +26,11 @@ from coc_mcp.config import (
 from coc_mcp.grading import (
     aggregate_player_war_history,
     carry_forward_recommendation,
+    find_missed_opportunities,
     grade_war,
     promotion_candidates,
 )
-from coc_mcp.reporting import carry_forward_markdown, war_report_markdown
+from coc_mcp.reporting import carry_forward_markdown, missed_opportunities_markdown, war_report_markdown
 
 
 mcp = FastMCP("coc_mcp")
@@ -423,11 +424,67 @@ async def clash_war_report(params: WarReportInput) -> str:
             return "No active war to report on. State: notInWar."
 
         graded = grade_war(war, rubric, war_type=params.war_type.value, our_clan_tag=our_clan_tag)
+        missed = find_missed_opportunities(war, our_clan_tag=our_clan_tag)
         meta = {
             "opponent_name": war.get("opponent", {}).get("name", "Opponent"),
             "result": _war_result(war, our_clan_tag),
         }
-        return war_report_markdown(graded, war_meta=meta)
+        return war_report_markdown(graded, war_meta=meta, missed=missed)
+    except Exception as e:
+        return _err(e)
+
+
+class MissedOpportunitiesInput(BaseModel):
+    """Input for the standalone missed-opportunities analysis."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    clan_tag: Optional[str] = Field(default=None, description="Clan tag (default from env).")
+    war_type: WarType = Field(default=WarType.REGULAR, description="'regular' or 'cwl'.")
+    war_tag: Optional[str] = Field(default=None, description="CWL war tag if grading a specific CWL round.")
+    th_buffer: int = Field(
+        default=0,
+        ge=0,
+        le=3,
+        description="Allow flagged 'weaker' targets up to this many TH levels above the attacker (default 0 = strictly ≤ attacker TH).",
+    )
+    response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
+
+
+@mcp.tool(
+    name="clash_missed_opportunities",
+    annotations={"title": "Find smart-attack misses (lower base was undefeated)", "readOnlyHint": True, "openWorldHint": True},
+)
+async def clash_missed_opportunities(params: MissedOpportunitiesInput) -> str:
+    """For each attack in the war, check if a weaker undefeated base was sitting there.
+
+    Walks attacks in chronological order, tracks which opponent bases have been
+    3-starred at each step, and flags any attack that:
+      1. Did NOT 3-star, AND
+      2. Was made when a weaker (higher mapPosition) opponent at TH ≤ attacker_th + th_buffer
+         was still undefeated.
+
+    This is the deeper version of the smart-3⭐ rule: not just "did they reach up too far"
+    but "given what was actually available at the time, could they have 3-starred a weaker
+    base instead?"
+
+    Returns markdown by default with high/medium/low severity buckets.
+    """
+    try:
+        client = _client()
+        if params.war_type == WarType.CWL and params.war_tag:
+            war = await client.get_cwl_war(params.war_tag)
+            our_clan_tag = params.clan_tag
+        else:
+            tag = _resolve_clan_tag(params.clan_tag)
+            war = await client.get_current_war(tag)
+            our_clan_tag = war.get("clan", {}).get("tag")
+
+        if war.get("state") in (None, "notInWar"):
+            return "No active war to analyze. State: notInWar."
+
+        missed = find_missed_opportunities(war, our_clan_tag=our_clan_tag, th_buffer=params.th_buffer)
+        if params.response_format == ResponseFormat.MARKDOWN:
+            return missed_opportunities_markdown(missed)
+        return _format(missed, params.response_format)
     except Exception as e:
         return _err(e)
 

@@ -85,7 +85,8 @@ Total attacks used: 26 · Missed: 4 · Avg ⭐/attack: 2.27 · Avg destruction: 
 | Tool | Purpose |
 |---|---|
 | `clash_grade_war` | Apply your rubric to a war's attacks → per-player grades, scores, rule violations |
-| `clash_war_report` | Markdown post-mortem answering: who attacked, who followed rules, performance leaderboard, smart-attack honor roll |
+| `clash_war_report` | Markdown post-mortem answering: who attacked, who followed rules, performance leaderboard, smart-attack honor roll, and missed opportunities |
+| `clash_missed_opportunities` | For each attack, check if a weaker undefeated base was sitting there at the time. The deeper version of the smart-attack rule. |
 | `clash_carry_forward_recommendation` | Analyze all CWL rounds → keep / review / bench list for next season |
 | `clash_promotion_candidates` | Screen Members against your elder bar (donation ratio, hero progress, war contribution) |
 
