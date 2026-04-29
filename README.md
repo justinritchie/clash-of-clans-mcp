@@ -89,6 +89,9 @@ Total attacks used: 26 · Missed: 4 · Avg ⭐/attack: 2.27 · Avg destruction: 
 | `clash_missed_opportunities` | For each attack, check if a weaker undefeated base was sitting there at the time. The deeper version of the smart-attack rule. |
 | `clash_carry_forward_recommendation` | Analyze all CWL rounds → keep / review / bench list for next season |
 | `clash_promotion_candidates` | Screen Members against your elder bar (donation ratio, hero progress, war contribution) |
+| `clash_snapshot_war` | Save current war (regular + CWL rounds) to local disk. Idempotent. Designed to run on a schedule. |
+| `clash_snapshot_status` | Show what's in the snapshot store + identify gaps vs the warlog |
+| `clash_player_war_history` | Pull a player's per-attack history across stored snapshots (attendance %, avg stars, trends) |
 
 ---
 

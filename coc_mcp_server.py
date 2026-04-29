@@ -31,6 +31,13 @@ from coc_mcp.grading import (
     promotion_candidates,
 )
 from coc_mcp.reporting import carry_forward_markdown, missed_opportunities_markdown, war_report_markdown
+from coc_mcp.snapshots import (
+    list_snapshots,
+    player_war_history,
+    reconcile_with_warlog,
+    snapshot_cwl_war as _snapshot_cwl_war,
+    snapshot_regular_war,
+)
 
 
 mcp = FastMCP("coc_mcp")
@@ -612,6 +619,131 @@ async def clash_promotion_candidates(params: PromotionCandidatesInput) -> str:
                 lines.append("")
             return "\n".join(lines)
         return _format(candidates, params.response_format)
+    except Exception as e:
+        return _err(e)
+
+
+# --- Snapshot store tools -------------------------------------------------
+
+
+class SnapshotInput(BaseModel):
+    """Input for clash_snapshot_war. All fields optional — designed for scheduled-task invocation."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    clan_tag: Optional[str] = Field(default=None, description="Clan tag (default from env).")
+    force: bool = Field(
+        default=False,
+        description="If True, snapshot even an in-progress war. Default False = only snapshot warEnded states.",
+    )
+    include_cwl: bool = Field(
+        default=True,
+        description="If True, also snapshot any warEnded CWL round wars from the current league group.",
+    )
+
+
+@mcp.tool(
+    name="clash_snapshot_war",
+    annotations={"title": "Save current war(s) to local snapshot store", "readOnlyHint": False, "openWorldHint": True},
+)
+async def clash_snapshot_war(params: SnapshotInput) -> str:
+    """Snapshot the current regular war (and optionally current CWL round wars) to local disk.
+
+    Idempotent — safe to call repeatedly. Dedupes by endTime + opponent.
+    Designed to be invoked by a scheduled Claude task every ~2 days.
+
+    Returns a JSON summary of what was snapshotted (or skipped, with reasons).
+    """
+    try:
+        client = _client()
+        tag = _resolve_clan_tag(params.clan_tag)
+        results: Dict[str, Any] = {"regular": None, "cwl": []}
+
+        # Regular war.
+        try:
+            war = await client.get_current_war(tag)
+            results["regular"] = snapshot_regular_war(war, force=params.force)
+        except CocApiError as e:
+            results["regular"] = {"snapshotted": False, "reason": f"API error: {e}", "path": None}
+
+        # CWL group + each warEnded round.
+        if params.include_cwl:
+            try:
+                group = await client.get_cwl_group(tag)
+                season = group.get("season", "unknown")
+                for round_obj in group.get("rounds", []):
+                    for war_tag in round_obj.get("warTags", []):
+                        if war_tag in (None, "#0"):
+                            continue
+                        try:
+                            cwl_war = await client.get_cwl_war(war_tag)
+                            if cwl_war.get("state") == "warEnded":
+                                # Only snapshot if our clan was in this war.
+                                if cwl_war.get("clan", {}).get("tag") == tag or cwl_war.get("opponent", {}).get("tag") == tag:
+                                    res = _snapshot_cwl_war(cwl_war, season=season, war_tag=war_tag)
+                                    results["cwl"].append({"war_tag": war_tag, **res})
+                        except CocApiError:
+                            continue
+            except CocApiError:
+                results["cwl"] = {"skipped": "Not currently in CWL."}
+
+        return _format(results, ResponseFormat.JSON)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool(
+    name="clash_snapshot_status",
+    annotations={"title": "Show snapshot store contents + reconciliation gaps", "readOnlyHint": True, "openWorldHint": True},
+)
+async def clash_snapshot_status(params: GetClanInput) -> str:
+    """Report what's in the snapshot store and identify gaps vs the warlog.
+
+    Useful as the second step in a scheduled task — first snapshot, then check
+    if there are gaps to flag (gaps are unrecoverable but worth knowing about).
+    """
+    try:
+        listing = list_snapshots()
+        # Try to compare to warlog.
+        try:
+            client = _client()
+            tag = _resolve_clan_tag(params.clan_tag)
+            warlog = await client.get_warlog(tag, limit=20)
+            recon = reconcile_with_warlog(warlog)
+        except Exception as e:
+            recon = {"error": f"Could not pull warlog for reconciliation: {e}"}
+
+        return _format({"listing": listing, "reconciliation": recon}, ResponseFormat.JSON)
+    except Exception as e:
+        return _err(e)
+
+
+class PlayerHistoryInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    player_tag: str = Field(..., min_length=2, description="Player tag like '#PLCVY2G2Q'.")
+    n: int = Field(default=10, ge=1, le=50, description="Max number of recent wars to include.")
+    response_format: ResponseFormat = Field(default=ResponseFormat.JSON)
+
+
+@mcp.tool(
+    name="clash_player_war_history",
+    annotations={"title": "Player's per-attack history from snapshot store", "readOnlyHint": True, "openWorldHint": True},
+)
+async def clash_player_war_history(params: PlayerHistoryInput) -> str:
+    """Pull a player's attacks across recent stored war snapshots.
+
+    Returns a flat timeline of attacks (target position, stars, destruction)
+    plus aggregate stats (attendance, avg stars/destruction). Only works for
+    wars that have been snapshotted — historical wars without snapshots are
+    invisible to this tool.
+
+    Use clash_snapshot_status to see how many snapshots exist.
+    """
+    try:
+        clan = get_default_clan_tag()
+        # Normalize clan tag for matching.
+        from coc_mcp.client import normalize_tag
+        clan_norm = normalize_tag(clan) if clan else None
+        history = player_war_history(params.player_tag, n=params.n, our_clan_tag=clan_norm)
+        return _format(history, params.response_format)
     except Exception as e:
         return _err(e)
 
