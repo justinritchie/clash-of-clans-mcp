@@ -38,6 +38,7 @@ from coc_mcp.snapshots import (
     snapshot_cwl_war as _snapshot_cwl_war,
     snapshot_regular_war,
 )
+from coc_mcp.tenure import list_cached_tenure, read_tenure
 
 
 mcp = FastMCP("coc_mcp")
@@ -594,7 +595,12 @@ async def clash_promotion_candidates(params: PromotionCandidatesInput) -> str:
             except CocApiError:
                 pass  # not in CWL — fall through with empty aggregated
 
-        candidates = promotion_candidates(members, aggregated, rubric)
+        # Load tenure cache if available — enriches the score.
+        tenure_lookup: Dict[str, Dict[str, Any]] = {}
+        for entry in list_cached_tenure():
+            tenure_lookup[entry["tag"]] = entry
+
+        candidates = promotion_candidates(members, aggregated, rubric, tenure_lookup=tenure_lookup)
 
         if params.response_format == ResponseFormat.MARKDOWN:
             eligible = [c for c in candidates if c["eligible"]]
@@ -609,11 +615,12 @@ async def clash_promotion_candidates(params: PromotionCandidatesInput) -> str:
                     lines.append("_(none)_")
                     lines.append("")
                     continue
-                lines.append("| Name | TH | Donated | Received | Ratio | War Score | Reasons |")
-                lines.append("|---|---|---|---|---|---|---|")
+                lines.append("| Name | TH | Tenure | Donated | Received | Ratio | War Score | Reasons |")
+                lines.append("|---|---|---|---|---|---|---|---|")
                 for c in group_list:
+                    tenure = f"{c.get('tenure_days')} d" if c.get('tenure_days') is not None else "—"
                     lines.append(
-                        f"| {c['name']} | {c['th']} | {c['donations']} | {c['received']} | "
+                        f"| {c['name']} | {c['th']} | {tenure} | {c['donations']} | {c['received']} | "
                         f"{c['donation_ratio']} | {c['war_score_window']} | {'; '.join(c['reasons'])} |"
                     )
                 lines.append("")
@@ -744,6 +751,64 @@ async def clash_player_war_history(params: PlayerHistoryInput) -> str:
         clan_norm = normalize_tag(clan) if clan else None
         history = player_war_history(params.player_tag, n=params.n, our_clan_tag=clan_norm)
         return _format(history, params.response_format)
+    except Exception as e:
+        return _err(e)
+
+
+# --- Tenure tools ----------------------------------------------------------
+
+
+class TenureInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    player_tag: str = Field(..., min_length=2, description="Player tag like '#CR20YL9Q'.")
+
+
+@mcp.tool(
+    name="clash_get_tenure",
+    annotations={"title": "Read cached tenure (days in clan) for a player", "readOnlyHint": True, "openWorldHint": False},
+)
+async def clash_get_tenure(params: TenureInput) -> str:
+    """Read cached tenure for a player from the local cache.
+
+    The official COC API doesn't expose tenure (days in clan). This tool reads
+    from a local cache populated by scraping clashofstats.com via Claude (chat
+    or scheduled task using crawl4ai). Returns a clear "not cached" message if
+    the player hasn't been scraped yet.
+
+    Cache lives at: snapshots/tenure/{tag}.json
+    """
+    try:
+        cached = read_tenure(params.player_tag)
+        if cached is None:
+            return _format(
+                {
+                    "tag": params.player_tag,
+                    "cached": False,
+                    "message": (
+                        "No tenure data cached for this player. To populate: in chat, "
+                        "ask Claude to refresh tenure for this player by scraping "
+                        f"https://www.clashofstats.com/players/{params.player_tag.lstrip('#')}/summary "
+                        "via crawl4ai, then call this tool again."
+                    ),
+                },
+                ResponseFormat.JSON,
+            )
+        return _format(cached, ResponseFormat.JSON)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool(
+    name="clash_list_tenure",
+    annotations={"title": "List all cached tenure entries", "readOnlyHint": True, "openWorldHint": False},
+)
+async def clash_list_tenure(params: GetClanInput) -> str:
+    """List all cached tenure entries — useful for seeing roster-wide tenure."""
+    try:
+        entries = list_cached_tenure()
+        # Sort by total_days desc for usefulness.
+        entries.sort(key=lambda e: -e.get("total_days_in_current_clan", 0))
+        return _format({"count": len(entries), "entries": entries}, ResponseFormat.JSON)
     except Exception as e:
         return _err(e)
 

@@ -564,20 +564,24 @@ def promotion_candidates(
     members: List[Dict[str, Any]],
     aggregated_war: Dict[str, Dict[str, Any]],
     rubric: Dict[str, Any],
+    tenure_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Apply elder_promotion_rubric to current members + war history.
 
     Args:
-        members: Roster from /clans/{tag}/members. Each item has tag, name, role, donations,
-                 donationsReceived, etc.
+        members: Roster from /clans/{tag}/members.
         aggregated_war: Output of aggregate_player_war_history (may be empty).
         rubric: Loaded rubric.
+        tenure_lookup: Optional dict mapping player_tag -> tenure record from
+            coc_mcp.tenure. If provided, the min_tenure_days bar is enforced.
+            If absent for a player, the tenure check is skipped (with a note).
 
     Returns:
         Sorted list of candidates with reasons.
     """
     cfg = rubric["elder_promotion_rubric"]
     out: List[Dict[str, Any]] = []
+    tenure_lookup = tenure_lookup or {}
 
     for m in members:
         if m.get("role") in ("elder", "coLeader", "leader", "admin"):
@@ -588,9 +592,19 @@ def promotion_candidates(
 
         war_row = aggregated_war.get(m["tag"], {})
         war_score = war_row.get("total_score", 0)
+        tenure_record = tenure_lookup.get(m["tag"])
+        tenure_days = tenure_record.get("total_days_in_current_clan", 0) if tenure_record else None
 
         reasons: List[str] = []
         eligible = True
+
+        # Tenure check.
+        min_tenure = cfg.get("min_tenure_days", 0)
+        if tenure_days is None:
+            reasons.append("Tenure data not cached — skipping tenure check.")
+        elif tenure_days < min_tenure:
+            eligible = False
+            reasons.append(f"Tenure {tenure_days} days below threshold {min_tenure}.")
 
         if ratio < cfg["min_donation_ratio"]:
             eligible = False
@@ -606,7 +620,7 @@ def promotion_candidates(
             eligible = False
             reasons.append(f"Missed {missed} attacks in window (max {cfg['max_missed_attacks_window']}).")
 
-        if eligible and not reasons:
+        if eligible and not [r for r in reasons if "below" in r or "Missed" in r]:
             reasons.append("Meets all elder criteria.")
 
         out.append({
@@ -615,6 +629,7 @@ def promotion_candidates(
             "role": m.get("role"),
             "th": m.get("townHallLevel"),
             "trophies": m.get("trophies"),
+            "tenure_days": tenure_days,
             "donation_ratio": round(ratio, 2),
             "donations": donated,
             "received": received,
@@ -624,5 +639,5 @@ def promotion_candidates(
             "reasons": reasons,
         })
 
-    out.sort(key=lambda r: (not r["eligible"], -r["war_score_window"], -r["donation_ratio"]))
+    out.sort(key=lambda r: (not r["eligible"], -(r.get("tenure_days") or 0), -r["war_score_window"], -r["donation_ratio"]))
     return out
