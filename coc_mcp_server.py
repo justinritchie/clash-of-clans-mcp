@@ -38,7 +38,7 @@ from coc_mcp.snapshots import (
     snapshot_cwl_war as _snapshot_cwl_war,
     snapshot_regular_war,
 )
-from coc_mcp.tenure import list_cached_tenure, read_tenure
+from coc_mcp.tenure import list_cached_tenure, read_tenure, update_api_role
 
 
 mcp = FastMCP("coc_mcp")
@@ -809,6 +809,77 @@ async def clash_list_tenure(params: GetClanInput) -> str:
         # Sort by total_days desc for usefulness.
         entries.sort(key=lambda e: -e.get("total_days_in_current_clan", 0))
         return _format({"count": len(entries), "entries": entries}, ResponseFormat.JSON)
+    except Exception as e:
+        return _err(e)
+
+
+# COC API role names → display names. (admin = Elder in the in-game UI.)
+_API_ROLE_DISPLAY = {
+    "leader": "Leader",
+    "coLeader": "Co-leader",
+    "admin": "Elder",
+    "member": "Member",
+}
+
+
+@mcp.tool(
+    name="clash_refresh_tenure_roles",
+    annotations={"title": "Refresh authoritative role on each cached tenure entry", "readOnlyHint": False, "openWorldHint": True},
+)
+async def clash_refresh_tenure_roles(params: GetClanInput) -> str:
+    """Stamp each cached tenure entry with the live COC API role.
+
+    The COS-scraped current_role can lag (briefly-promoted/demoted players, etc.).
+    The COC API is the source of truth. This tool fetches the current clan
+    roster (one API call) and updates every cached tenure entry's
+    api_current_role field.
+
+    Also flags:
+      - Disagreements between COS-parsed role and live API role
+      - Players who are no longer in the clan (kicked / left)
+
+    Designed to be called by the scheduled snapshot task right after
+    clash_snapshot_war.
+    """
+    try:
+        client = _client()
+        tag = _resolve_clan_tag(params.clan_tag)
+        cached = list_cached_tenure()
+        members = (await client.get_clan_members(tag)).get("items", []) or []
+        members_by_tag = {m["tag"].upper(): m for m in members}
+
+        updated = 0
+        skipped_not_in_clan: list[str] = []
+        disagreements: list[Dict[str, Any]] = []
+
+        for entry in cached:
+            etag = entry["tag"].upper()
+            member = members_by_tag.get(etag)
+            if not member:
+                skipped_not_in_clan.append(entry.get("name") or etag)
+                continue
+            api_role_raw = member.get("role", "member")
+            api_role = _API_ROLE_DISPLAY.get(api_role_raw, api_role_raw)
+            old_cos = entry.get("current_role")
+            if old_cos and old_cos.replace("-", "").lower() != api_role.replace("-", "").lower():
+                disagreements.append({
+                    "name": entry.get("name"),
+                    "tag": entry["tag"],
+                    "cos_role": old_cos,
+                    "api_role": api_role,
+                })
+            update_api_role(entry["tag"], api_role)
+            updated += 1
+
+        return _format(
+            {
+                "cached_total": len(cached),
+                "updated": updated,
+                "no_longer_in_clan": skipped_not_in_clan,
+                "cos_api_disagreements": disagreements,
+            },
+            ResponseFormat.JSON,
+        )
     except Exception as e:
         return _err(e)
 
