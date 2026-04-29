@@ -140,8 +140,24 @@ def _normalize_tag(tag: str) -> str:
     return tag.lstrip("#").upper()
 
 
-def write_tenure(player_tag: str, name: str, parsed: Dict[str, Any], snapshot_dir: Optional[Path] = None) -> Path:
-    """Write parsed tenure data to the cache."""
+def write_tenure(
+    player_tag: str,
+    name: str,
+    parsed: Dict[str, Any],
+    snapshot_dir: Optional[Path] = None,
+    api_current_role: Optional[str] = None,
+) -> Path:
+    """Write parsed tenure data to the cache.
+
+    Args:
+        player_tag: Player tag.
+        name: Display name.
+        parsed: Output of parse_tenure_markdown(); contains COS-derived role history.
+        snapshot_dir: Cache directory override.
+        api_current_role: If provided, stored as `api_current_role` — authoritative
+            role from the live COC API. Use this for any "what role is this player"
+            question; the COS-derived `current_role` can lag or misorder.
+    """
     base = get_tenure_dir(snapshot_dir)
     payload = {
         "tag": "#" + _normalize_tag(player_tag),
@@ -149,8 +165,26 @@ def write_tenure(player_tag: str, name: str, parsed: Dict[str, Any], snapshot_di
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         **parsed,
     }
+    if api_current_role is not None:
+        payload["api_current_role"] = api_current_role
     path = base / f"{_normalize_tag(player_tag)}.json"
     path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
+def update_api_role(player_tag: str, api_role: str, snapshot_dir: Optional[Path] = None) -> Optional[Path]:
+    """Update the api_current_role field on an existing cache entry.
+
+    Returns the path written to, or None if the entry doesn't exist yet.
+    """
+    base = get_tenure_dir(snapshot_dir)
+    path = base / f"{_normalize_tag(player_tag)}.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text())
+    data["api_current_role"] = api_role
+    data["api_role_updated_at"] = datetime.now(timezone.utc).isoformat()
+    path.write_text(json.dumps(data, indent=2))
     return path
 
 
