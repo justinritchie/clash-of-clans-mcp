@@ -100,31 +100,32 @@ def find_missed_opportunities(
     *,
     our_clan_tag: Optional[str] = None,
     th_buffer: int = 0,
+    first_attack_offsets: Tuple[int, ...] = (0, 1),
+    war_type: str = "regular",
 ) -> List[Dict[str, Any]]:
-    """Identify attacks where a weaker, undefeated base was available at the time.
+    """Identify attacks where a smarter target was actually available at the time.
 
-    Walks attacks in chronological `order` and tracks which opponent bases have
-    been 3-starred. For each attack at order N, checks whether — at that exact
-    moment — there was a still-undefeated base WEAKER than the one chosen
-    (higher map position) AND at a TH the attacker could plausibly handle.
+    Respects the standard attack rules:
+      - First attack: hit mirror or one-down (offsets 0 or +1 by default).
+        If the player followed this rule, NOT a missed opportunity even if they
+        didn't 3-star (they went after their assigned target).
+        ONLY flag a first attack if it broke the rule (reached up, or skipped
+        too far past one-down) AND a correct target was available.
+      - Second attack: smart 3-star rule. If didn't 3-star AND a weaker
+        undefeated base (≤ attacker_th + buffer) was sitting there, flag it.
 
     Args:
         war: Raw war JSON.
         our_clan_tag: Our clan tag. Auto-detect if absent.
         th_buffer: Allow weaker bases up to this many TH levels above the
-            attacker's TH (default 0 = strictly weaker or equal TH). Set to 1
-            to be more lenient.
+            attacker's TH (default 0 = strictly weaker or equal TH).
+        first_attack_offsets: Acceptable offsets for first attack
+            (default (0, 1) = mirror or one-down).
+        war_type: 'regular' (2 attacks per player) or 'cwl' (1 attack — treated
+            like a first attack for rule compliance).
 
     Returns:
-        List of missed-opportunity records sorted by severity:
-            {
-              attacker_name, attacker_tag, attacker_pos, attacker_th,
-              attack_order, attack_seq,
-              actual_target_pos, actual_target_th, actual_stars, actual_destruction,
-              available_weaker_undefeated: [{pos, tag, th}, ...],
-              severity: 'high' | 'medium' | 'low',
-              note: str,
-            }
+        List of missed-opportunity records sorted by severity.
     """
     # Identify our side and their side.
     if our_clan_tag and war.get("opponent", {}).get("tag") == our_clan_tag:
@@ -190,16 +191,39 @@ def find_missed_opportunities(
                         "th": opp_th,
                     })
 
-        # An attack only counts as a "missed opportunity" if:
-        #   1. They didn't 3-star (otherwise no "missed" — they did the job)
-        #   2. AND a weaker undefeated base was available at the time
-        is_missed = (stars < 3 and len(weaker_avail) > 0)
+        # Decide if this attack qualifies as a "missed opportunity" by sequence.
+        offset = defender_pos - attacker_pos if (defender_pos and attacker_pos) else 0
+        is_missed = False
+        violation_kind = ""
+
+        if seq == 1 or war_type == "cwl":
+            # First attack (or CWL single attack): rule is mirror/one-down.
+            # If the player followed the rule, NOT a missed opportunity — they
+            # went after their assigned target, even if they didn't 3-star.
+            # Only flag if they BROKE the rule AND a correct target was available.
+            if offset not in first_attack_offsets:
+                # Did they reach up (negative offset) or skip past one-down (>1)?
+                # Either way, was a "correct" target (mirror or one-down position)
+                # actually undefeated at the time?
+                correct_positions = [attacker_pos + o for o in first_attack_offsets if attacker_pos]
+                correct_undefeated = [
+                    p for p in correct_positions
+                    if p in opp_tags_by_pos and p not in cleared_positions
+                ]
+                if correct_undefeated and stars < 3:
+                    is_missed = True
+                    violation_kind = "broke first-attack rule"
+        else:
+            # Second attack: smart 3-star rule. If didn't 3-star AND a weaker
+            # undefeated base was sitting there, missed opportunity.
+            if stars < 3 and len(weaker_avail) > 0:
+                is_missed = True
+                violation_kind = "second-attack should have gone for the easier 3⭐"
 
         if is_missed:
-            # Severity: how much higher did they reach + how big the gap to weaker target?
-            offset = defender_pos - attacker_pos if (defender_pos and attacker_pos) else 0
-            weakest_avail_pos = max(w["pos"] for w in weaker_avail)
-            gap = weakest_avail_pos - defender_pos
+            # Severity: how much was left on the table?
+            weakest_avail_pos = max(w["pos"] for w in weaker_avail) if weaker_avail else None
+            gap = (weakest_avail_pos - defender_pos) if weakest_avail_pos is not None else 0
             if offset < 0 and stars <= 1:
                 severity = "high"
             elif gap >= 3 or stars == 0:
@@ -210,9 +234,9 @@ def find_missed_opportunities(
                 severity = "low"
 
             note = (
+                f"Attack #{seq}: {violation_kind}. "
                 f"Hit base #{defender_pos} (TH{defender_th}) for {stars}⭐ {destruction:.0f}%; "
-                f"{len(weaker_avail)} weaker undefeated base(s) were available "
-                f"(positions {[w['pos'] for w in weaker_avail]})."
+                f"{len(weaker_avail)} weaker undefeated base(s) available."
             )
 
             out.append({
@@ -222,6 +246,7 @@ def find_missed_opportunities(
                 "attacker_th": attacker_th,
                 "attack_order": atk.get("order"),
                 "attack_seq": seq,
+                "violation_kind": violation_kind,
                 "actual_target_pos": defender_pos,
                 "actual_target_th": defender_th,
                 "actual_stars": stars,

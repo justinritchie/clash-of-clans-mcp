@@ -98,22 +98,19 @@ def test_carry_forward_keeps_top_benches_noshow(regular_war, rubric):
     assert by_name["NoShow"]["recommendation"] == "bench"
 
 
-def test_find_missed_opportunities_flags_reach_up(regular_war):
-    """In the fixture: P3 (RuleBreaker) attacks E5 (pos 5). E4 (pos 4) wasn't even a weaker option,
-    but at the moment of P4's attack on E4 (1⭐, 55%), E5 was still undefeated by anyone.
-    So P4 attacking E4 with E5 sitting there should flag — P4 is TH16 and E5 is TH16.
+def test_find_missed_opportunities_skips_correct_first_attacks(regular_war):
+    """Correct first attacks (mirror or one-down) that didn't 3-star should NOT be flagged.
 
-    Order of attacks in fixture:
-      order=1: P1 -> E1 (3⭐)  → clears pos 1
-      order=2: P2 -> E2 (2⭐)
-      order=3: P3 -> E5 (3⭐)  → clears pos 5
-      order=4: P4 -> E4 (1⭐)  ← at this moment, what's undefeated and weaker than #4? Only #5, but #5 was 3⭐'d at order 3. So no missed opportunity.
-      order=5: P1 -> E3 (3⭐)  → clears pos 3
-      order=6: P2 -> E4 (3⭐)  → clears pos 4
+    In the fixture, P2 (MirrorBoss) attacks E2 (mirror, +0) for 2⭐ 89%. That's a
+    correct first attack — even without 3⭐, it's not a 'missed opportunity'.
+    P4 attacks E4 (mirror) for 1⭐ 55% — also a correct first attack. Should NOT
+    be flagged.
     """
     missed = find_missed_opportunities(regular_war, our_clan_tag="#YV9JRULU")
-    # No clear missed opportunities in this fixture (cleared bases tracked correctly).
-    assert isinstance(missed, list)
+    # Neither P2 nor P4's first attacks should be flagged — they hit their mirrors.
+    by_attacker = {(m["attacker_tag"], m["attack_seq"]): m for m in missed}
+    assert ("#P2", 1) not in by_attacker
+    assert ("#P4", 1) not in by_attacker
 
 
 def test_find_missed_opportunities_with_synthetic(regular_war):
