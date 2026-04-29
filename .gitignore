@@ -10,3 +10,6 @@ venv/
 .mypy_cache/
 *.egg-info/
 config/rubric.local.json
+
+# War snapshots — local data, not for the repo
+snapshots/

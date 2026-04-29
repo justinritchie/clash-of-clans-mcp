@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-DEFAULT_SNAPSHOT_DIR = Path.home() / ".coc-mcp" / "snapshots"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"
 
 
 def get_snapshot_dir() -> Path:
