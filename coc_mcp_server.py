@@ -38,6 +38,7 @@ from coc_mcp.snapshots import (
     snapshot_cwl_war as _snapshot_cwl_war,
     snapshot_regular_war,
 )
+from coc_mcp.in_war import in_war_status, in_war_status_markdown
 from coc_mcp.tenure import list_cached_tenure, read_tenure, update_api_role
 
 
@@ -626,6 +627,38 @@ async def clash_promotion_candidates(params: PromotionCandidatesInput) -> str:
                 lines.append("")
             return "\n".join(lines)
         return _format(candidates, params.response_format)
+    except Exception as e:
+        return _err(e)
+
+
+# --- In-war status --------------------------------------------------------
+
+
+@mcp.tool(
+    name="clash_in_war_status",
+    annotations={"title": "Where are we in the current war right now", "readOnlyHint": True, "openWorldHint": True},
+)
+async def clash_in_war_status(params: GetClanInput) -> str:
+    """Mid-war status report: score, time remaining, who hasn't attacked yet,
+    and projection of final outcome at current pace.
+
+    Works whether the war is in preparation, in progress, or just ended.
+    Use this when you want a snapshot of "where do we stand right now" —
+    different framing from clash_war_report which is a post-mortem.
+
+    Defaults to markdown output for human-friendly readout.
+    """
+    try:
+        client = _client()
+        tag = _resolve_clan_tag(params.clan_tag)
+        war = await client.get_current_war(tag)
+        if war.get("state") in (None, "notInWar"):
+            return "_Clan is not currently in a war._"
+        our_clan_tag = war.get("clan", {}).get("tag")
+        status = in_war_status(war, our_clan_tag=our_clan_tag)
+        if params.response_format == ResponseFormat.MARKDOWN:
+            return in_war_status_markdown(status)
+        return _format(status, params.response_format)
     except Exception as e:
         return _err(e)
 
