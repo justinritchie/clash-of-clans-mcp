@@ -1,6 +1,16 @@
 .DS_Store
 .env
 .env.local
+
+# Anything holding the API token. The bare `.env` rule above does NOT cover
+# timestamped backups (.env.bak.20260726161525) or the helper that exports the
+# token inline — both existed untracked in this repo and were one `git add -A`
+# away from being published.
+.env.bak*
+.env.*.bak
+*.env.bak*
+set_coc_token.sh
+
 __pycache__/
 *.pyc
 *.log

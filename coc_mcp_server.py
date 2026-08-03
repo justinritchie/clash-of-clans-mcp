@@ -917,6 +917,211 @@ async def clash_refresh_tenure_roles(params: GetClanInput) -> str:
         return _err(e)
 
 
+# --- CWL round reading + swap advice ---------------------------------------
+#
+# The once-per-round operator question: given who is locked into today's
+# roster and how they actually performed, who do I swap out and who comes in?
+#
+# Members do not announce going inactive, so every input is derived from
+# observed behaviour — attacks used, stars — never from asking.
+
+
+class CwlLineupInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    clan_tag: Optional[str] = Field(default=None, description="Defaults to COC_DEFAULT_CLAN_TAG.")
+    round: Optional[int] = Field(default=None, ge=1, le=7,
+                                 description="1-indexed CWL round. Omit for the latest drawn round.")
+    war_tag: Optional[str] = Field(default=None, description="Explicit war tag, bypasses round lookup.")
+    response_format: ResponseFormat = Field(default=ResponseFormat.JSON)
+
+
+class CwlSwapAdviceInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    clan_tag: Optional[str] = Field(default=None, description="Defaults to COC_DEFAULT_CLAN_TAG.")
+    round: Optional[int] = Field(default=None, ge=1, le=7,
+                                 description="1-indexed CWL round. Omit for the latest drawn round.")
+    max_swaps: int = Field(default=5, ge=1, le=15)
+    check_war_preference: bool = Field(
+        default=True,
+        description="Read each member's in-game war preference (in/out). Costs one API "
+                    "call per member (~45) but is the only EXPLICIT signal available — "
+                    "everything else is inferred from behaviour. Set False to skip.",
+    )
+    response_format: ResponseFormat = Field(default=ResponseFormat.JSON)
+
+
+async def _cwl_lineup_payload(clan_tag: str, round_no: Optional[int], war_tag: Optional[str]):
+    """Shared by both tools. Returns (payload, league_group, war)."""
+    from coc_mcp import cwl as _cwl
+
+    client = _client()
+    group = await client.get_cwl_group(clan_tag)
+    th_index = _cwl.build_th_index(group)
+
+    notes: List[str] = []
+    if war_tag:
+        war = await client.get_cwl_war(war_tag)
+        resolved_round = round_no
+    else:
+        _, resolved_round, res_notes = _cwl.resolve_round_war(group, clan_tag, round_no)
+        tags: List[str] = []
+        for n in res_notes:
+            if n.startswith("__TAGS__"):
+                tags = n[len("__TAGS__"):].split(",")
+            else:
+                notes.append(n)
+        war = None
+        # Only ONE war per round involves us; stop as soon as it is found
+        # rather than fetching all four.
+        for t in tags:
+            candidate = await client.get_cwl_war(t)
+            probe = _cwl.lineup_from_war(candidate, clan_tag, th_index)
+            if probe is not None:
+                war, war_tag = candidate, t
+                break
+        if war is None:
+            return {"error": "our clan's war not found for that round",
+                    "round": resolved_round, "notes": notes}, group, None
+
+    lineup = _cwl.lineup_from_war(war, clan_tag, th_index)
+    if lineup is None:
+        return {"error": "war does not involve this clan", "war_tag": war_tag}, group, war
+    lineup["round"] = resolved_round
+    lineup["war_tag"] = war_tag
+    if notes:
+        lineup["notes"] = notes
+    return lineup, group, war
+
+
+@mcp.tool(
+    name="clash_cwl_lineup",
+    annotations={"title": "CWL round lineup at true map slots", "readOnlyHint": True, "openWorldHint": True},
+)
+async def clash_cwl_lineup(params: CwlLineupInput) -> str:
+    """Read a CWL round: our 15 vs theirs at TRUE map slots, TH per slot, per-slot
+    delta, and aggregate TH sums. Defaults to the latest drawn round.
+
+    Two traps this handles that a raw clash_get_cwl_war does not:
+    mapPosition is a SPARSE roster index, not the map slot — mirrors are only
+    correct after sorting each side and re-indexing 1..N. And townhallLevel is
+    absent from war members during `preparation`, so TH is joined from the
+    leaguegroup roster (which spells it townHallLevel).
+    """
+    try:
+        tag = _resolve_clan_tag(params.clan_tag)
+        payload, _, _ = await _cwl_lineup_payload(tag, params.round, params.war_tag)
+        return _format(payload, params.response_format)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool(
+    name="clash_cwl_swap_advice",
+    annotations={"title": "CWL lineup swap recommendations", "readOnlyHint": True, "openWorldHint": True},
+)
+async def clash_cwl_swap_advice(params: CwlSwapAdviceInput) -> str:
+    """Given the locked roster for a CWL round, rank who to swap OUT and who to
+    bring IN, with the evidence inline on every row.
+
+    Swap-out priority: a missed CWL attack THIS season first (one attack is a
+    seventh of a player's whole CWL contribution, and an unexplained no-show is
+    the strongest proxy for someone having gone quiet), then low score on a
+    NEGATIVE TH mirror, then low score, then never-evaluated.
+
+    READ THE CAVEATS IN THE RESPONSE. `archive_lag_days` reports how stale the
+    scoring archive is; members who never appeared in a snapshotted war are
+    returned with confidence "none" and a null score, meaning UNEVALUATED, not
+    bad. A swap proposed on weak evidence says so in its own row.
+    """
+    try:
+        from coc_mcp import cwl as _cwl
+        import recommend_lineup as _rl
+        from datetime import datetime, timezone
+
+        tag = _resolve_clan_tag(params.clan_tag)
+        lineup, group, _war = await _cwl_lineup_payload(tag, params.round, None)
+        if "error" in lineup:
+            return _format(lineup, params.response_format)
+
+        now = datetime.now(timezone.utc)
+        records = _rl.extract_records(tag)
+        scores = _rl.score_players(records, now) if records else {}
+
+        # Staleness must be loud. The warlog knows about wars the snapshot
+        # store missed, and that discrepancy IS the signal.
+        latest = max((r["end"] for r in records), default=None)
+        lag_days = (now - latest).days if latest else None
+
+        members = ((await _client().get_clan_members(tag)) or {}).get("items") or []
+
+        # No-shows THIS season, from the rounds already played.
+        no_shows: Dict[str, int] = {}
+        for rnd in range((params.round or 1) - 1, 0, -1):
+            try:
+                past, _, _ = await _cwl_lineup_payload(tag, rnd, None)
+            except Exception:
+                continue
+            if "error" in past:
+                continue
+            for row in past.get("slots") or []:
+                if row.get("our_tag") and (row.get("our_attacks_used") or 0) == 0:
+                    no_shows[row["our_tag"]] = no_shows.get(row["our_tag"], 0) + 1
+
+        # In-game war preference is the ONE explicit signal in this whole tool —
+        # everything else is inferred from behaviour because members do not
+        # announce going inactive. It is not on the members list, only on the
+        # individual player object, so it costs one call each. Bounded
+        # concurrency keeps that civil to the API; failures degrade to "unknown"
+        # rather than taking the whole call down.
+        war_prefs: Dict[str, str] = {}
+        if params.check_war_preference and members:
+            import asyncio as _asyncio
+
+            sem = _asyncio.Semaphore(8)
+
+            async def _pref(tag: str):
+                async with sem:
+                    try:
+                        p = await _client().get_player(tag)
+                        return tag, p.get("warPreference")
+                    except Exception:
+                        return tag, None
+
+            for tag, pref in await _asyncio.gather(
+                *(_pref(m["tag"]) for m in members if m.get("tag"))
+            ):
+                if pref:
+                    war_prefs[tag] = pref
+
+        advice = _cwl.swap_advice(
+            lineup, scores, members, no_shows, params.max_swaps, war_prefs
+        )
+        advice.update(
+            {
+                "round": lineup.get("round"),
+                "war_tag": lineup.get("war_tag"),
+                "state": lineup.get("state"),
+                "opponent": lineup.get("opponent"),
+                "th_sum_delta": lineup.get("th_sum_delta"),
+                "negative_mirror_slots": lineup.get("negative_mirror_slots"),
+                "archive_lag_days": lag_days,
+                "archive_latest_war": latest.strftime("%Y-%m-%d") if latest else None,
+                "scored_players": len(scores),
+            }
+        )
+        if lag_days is not None and lag_days > 7:
+            advice["STALENESS_WARNING"] = (
+                f"Scoring archive is {lag_days} days old (latest snapshotted war "
+                f"{advice['archive_latest_war']}). Wars fought since then are not in "
+                "the store, so these scores describe an old picture. Treat rankings "
+                "as indicative, and weight the this-season no-show counts — which "
+                "come from live round data, not the archive — much more heavily."
+            )
+        return _format(advice, params.response_format)
+    except Exception as e:
+        return _err(e)
+
+
 # --- Entrypoint ------------------------------------------------------------
 
 if __name__ == "__main__":

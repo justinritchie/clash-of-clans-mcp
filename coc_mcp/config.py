@@ -6,14 +6,29 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+
+    # Load THIS repo's .env by absolute path, and let it win.
+    #
+    # Two reasons this must be explicit:
+    #   1. Bare load_dotenv() searches upward from the current working
+    #      directory. Claude Desktop spawns the MCP server with a CWD that is
+    #      not this repo, so the .env is never found.
+    #   2. load_dotenv defaults to override=False, so a stale COC_API_TOKEN
+    #      inherited from the Claude Desktop config's env block would silently
+    #      take precedence over a freshly rotated token in .env.
+    #
+    # Symptom when this is wrong: a direct curl with the .env token returns
+    # HTTP 200 while every MCP tool reports accessDenied.
+    load_dotenv(REPO_ROOT / ".env", override=True)
 except ImportError:
     pass
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+
 DEFAULT_RUBRIC_PATH = REPO_ROOT / "config" / "rubric.default.json"
 
 
